@@ -1,22 +1,34 @@
-# myune\_music
+# Myune Music
 
-一个基于 **Flutter (Dart)** 实现的简易本地音乐播放器。
+一个基于 **Flutter (Dart)** 实现的现代化跨平台本地音乐播放器。
+
+> 🙏 **致谢原作者**  
+> 本项目基于 [xiaobaimc/myune_music](https://github.com/xiaobaimc/myune_music) 进行修改和增强。  
+> 感谢原作者 **xiaobaimc** 的开源贡献，为我们提供了优秀的基础代码！
 
 ## ✨ 特性
-* 支持 **windows**/**linux** 双端 (linux可能会有点小问题)
-* 使用歌单管理歌曲
-* 支持添加文件夹管理歌曲
-* 根据 **歌手** 和 **专辑** 自动分类歌曲
-* 使用 [**Material 3**](https://m3.material.io/) 配色
-* 支持导入多种 **本地音频格式**，自动读取 **音频元数据**
-* 支持 **歌词显示**，兼容本地 `.lrc` 文件及音频文件中的 **内嵌歌词**，支持从网络获取歌词
-* 提供 **音调控制** 与 **倍速播放** 功能
-* 支持读取多种 **音频文件信息**
-* 可自定义 **主题配色**与**字体**
-* 支持 **SMTC（系统媒体传输控制）**
-* 支持 Linux 下的 **MPRIS**
-* 支持 **音频独占** 播放 （仅Winsows）
-* 支持 **手动选择音频输出设备**
+
+### 🎵 核心功能
+* 🎶 支持多种 **本地音频格式**，自动读取 **音频元数据**
+* 📝 **智能歌词显示**：支持本地 `.lrc` 文件、音频文件 **内嵌歌词** 及 **网络歌词获取**
+* 🎚️ **高级音频控制**：音调调节、倍速播放、音量控制
+* 📁 **灵活的音乐管理**：歌单管理、文件夹导入、按歌手/专辑自动分类
+
+### 🎨 界面与体验
+* 🎨 采用 [**Material 3**](https://m3.material.io/) 设计语言
+* 🌈 **自定义主题配色** 与 **字体选择**
+* 🖥️ **悬浮歌词窗口**：支持实时歌词显示，可自定义样式和位置
+* 📊 **状态栏歌词**：在系统状态栏显示当前歌词
+
+### 🖥️ 平台支持
+* 💻 **macOS**：完整功能支持，包括原生媒体控制
+* 🪟 **Windows**：支持 SMTC（系统媒体传输控制）、音频独占播放
+* 🐧 **Linux**：支持 MPRIS 协议
+
+### 🎛️ 系统集成
+* 🎮 **系统媒体控制**：支持键盘媒体键、通知中心控制
+* 🔊 **音频设备管理**：手动选择音频输出设备
+* ⌨️ **全局快捷键**：支持系统级快捷键控制
 
 ## 🌐 关于网络歌词获取
 
@@ -24,20 +36,33 @@
 
 实现参考 [通过歌曲名获取原文+翻译歌词](https://www.showby.top/archives/624)
 
-## 🔧关于 Linux
+## 🔧 平台特定说明
 
-目前 Linux 版本仅在 **Debian 12 + Gnome(X11)** 测试过，已知问题有**无法选择字体**
+### 🍎 macOS
+* ✅ **完整功能支持**：悬浮歌词、状态栏歌词、原生媒体控制
+* ✅ **系统集成**：支持媒体键、通知中心控制
+* ✅ **原生体验**：完全适配 macOS 设计规范
 
-目前只提供可执行文件 且图标之类的也没有，后续会考虑其他方案
+### 🐧 Linux
+* 📍 **测试环境**：Debian 12 + Gnome(X11)
+* ⚠️ **已知问题**：无法选择字体
+* 🔧 **依赖要求**：需要安装 `libmpv`
 
-### 在使用前安装依赖
+#### Linux 依赖安装
 
-需要安装 `libmpv`
-
-例如 **Ubuntu/Debian**
-
-``` bash
+**Ubuntu/Debian**
+```bash
 sudo apt install libmpv-dev mpv 
+```
+
+**Fedora/RHEL**
+```bash
+sudo dnf install mpv-devel mpv
+```
+
+**Arch Linux**
+```bash
+sudo pacman -S mpv
 ```
 
 ## 📸 项目截图
@@ -51,35 +76,140 @@ sudo apt install libmpv-dev mpv
 
 ## 🚀 快速开始
 
-### 环境要求
+### 📋 环境要求
 
-* 安装 **Rust** 环境
-* 安装 **Flutter SDK**，版本需 ≥ 3.8.0
+* **Flutter SDK** ≥ 3.8.0
+* **Dart SDK** ≥ 3.8.0  
+* **Rust** 工具链（用于 Rust 桥接）
 
-### 安装依赖
+#### 平台特定要求
 
+**macOS**
+* Xcode 14.0+
+* macOS 10.14+
+
+**Windows**
+* Visual Studio 2022 或 Visual Studio Build Tools
+* Windows 10+
+
+**Linux**
+* GCC 编译器
+* 相关开发库（见上方依赖安装）
+
+### 🔧 安装与构建
+
+1. **克隆项目**
+```bash
+git clone <repository-url>
+cd myune_music
+```
+
+2. **安装 Flutter 依赖**
 ```bash
 flutter pub get
 ```
 
-### 启动项目
-
+3. **运行项目**
 ```bash
+# 开发模式
 flutter run
+
+# 或指定平台
+flutter run -d macos
+flutter run -d windows
+flutter run -d linux
 ```
 
-## 📦 使用的插件与致谢
+4. **构建发布版本**
+```bash
+# macOS
+flutter build macos --release
 
-* [**audio\_metadata\_reader**](https://pub.dev/packages/audio_metadata_reader)：读取音频元信息
-* [**media_kit**](https://pub.dev/packages/media_kit)：音频播放支持（太好用了）
-* [**anni\_mpris\_service**](https://pub.dev/packages/anni_mpris_service): D-Bus MPRIS 控件
-* 更多依赖请查看 [pubspec.yaml](pubspec.yaml)
+# Windows  
+flutter build windows --release
 
-感谢以下项目和开发者的无私分享：
+# Linux
+flutter build linux --release
+```
 
-* [**爱情终是残念**](https://aqzscn.cn/archives/flutter-smtc) 与 [**Ferry-200**](https://github.com/Ferry-200/coriander_player)：提供了 Rust + Flutter 的 **SMTC 实现参考**
+## 📦 主要依赖与致谢
 
-🙏 再次致敬所有热爱开源、默默付出的开发者们！
+### 🔧 核心依赖
+* [**media_kit**](https://pub.dev/packages/media_kit) - 强大的跨平台音频播放引擎
+* [**audio_metadata_reader**](https://pub.dev/packages/audio_metadata_reader) - 音频元数据读取
+* [**flutter_rust_bridge**](https://pub.dev/packages/flutter_rust_bridge) - Flutter 与 Rust 桥接
+* [**provider**](https://pub.dev/packages/provider) - 状态管理
+* [**shared_preferences**](https://pub.dev/packages/shared_preferences) - 本地存储
+
+### 🖥️ 平台特定
+* [**anni_mpris_service**](https://pub.dev/packages/anni_mpris_service) - Linux MPRIS 协议支持
+* [**window_manager**](https://pub.dev/packages/window_manager) - 窗口管理
+* [**system_fonts**](https://pub.dev/packages/system_fonts) - 系统字体获取
+
+### 🎨 UI 组件
+* [**flutter_colorpicker**](https://pub.dev/packages/flutter_colorpicker) - 颜色选择器
+* [**scrollable_positioned_list**](https://pub.dev/packages/scrollable_positioned_list) - 可定位滚动列表
+
+> 📄 完整依赖列表请查看 [pubspec.yaml](pubspec.yaml)
+
+### 🙏 特别致谢
+
+* [**xiaobaimc**](https://github.com/xiaobaimc/myune_music) - 原项目作者，提供了优秀的基础代码
+* [**爱情终是残念**](https://aqzscn.cn/archives/flutter-smtc) - SMTC 实现参考
+* [**Ferry-200**](https://github.com/Ferry-200/coriander_player) - Rust + Flutter 架构参考
+* [**小米公司**](https://hyperos.mi.com/font/) - MiSans 字体支持
+* 所有开源项目的贡献者们 ❤️
+
+## 🔄 本分支改进
+
+基于原项目 [xiaobaimc/myune_music](https://github.com/xiaobaimc/myune_music)，本分支主要进行了以下改进：
+
+### 🍎 macOS 平台增强
+* ✅ **完整 macOS 支持**：从原来的 Windows/Linux 双端扩展到三端支持
+* ✅ **悬浮歌词窗口**：全新实现的桌面悬浮歌词功能
+* ✅ **状态栏歌词**：在 macOS 状态栏显示当前歌词
+* ✅ **原生媒体控制**：完整的 macOS 媒体键和通知中心集成
+
+### 🎵 歌词功能优化
+* ✅ **实时歌词更新**：修复悬浮歌词不实时更新的问题
+* ✅ **自适应窗口**：悬浮歌词窗口根据内容自动调整大小
+* ✅ **位置记忆**：记住用户设置的悬浮窗口位置
+* ✅ **样式自定义**：支持字体、颜色、背景等完全自定义
+
+### 🔧 技术架构改进
+* ✅ **Swift 原生插件**：为 macOS 开发专用的原生媒体服务插件
+* ✅ **状态管理优化**：改进歌词显示的状态同步机制
+* ✅ **性能优化**：优化定时器和内存使用
+
+## 📈 版本信息
+
+当前版本：**v0.6.4**
+
+### 🆕 最新更新
+* ✅ 修复悬浮歌词实时更新问题
+* ✅ 优化关闭按钮位置自适应逻辑
+* ✅ 改进状态栏歌词显示
+* ✅ 增强 macOS 平台兼容性
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+### 🐛 报告问题
+* 使用 [GitHub Issues](../../issues) 报告 Bug
+* 请详细描述问题复现步骤
+* 提供系统环境信息
+
+### 💡 功能建议
+* 在 Issues 中提出新功能建议
+* 说明功能的使用场景和预期效果
+
+### 🔧 代码贡献
+1. Fork 本项目
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 创建 Pull Request
 
 ## 📄 许可证
 
