@@ -245,8 +245,9 @@ class DesktopLyricsManager {
       _currentLyricIndex = newIndex;
       if (newIndex >= 0 && newIndex < _lyrics.length) {
         final lyricLine = _lyrics[newIndex];
+        // 显示同一时间戳的所有歌词行，用换行符连接
         final lyricText = lyricLine.texts.isNotEmpty 
-            ? lyricLine.texts.first 
+            ? lyricLine.texts.join('\n')
             : '';
         _setCurrentLyric(lyricText);
       } else {
@@ -286,8 +287,9 @@ class DesktopLyricsManager {
     if (!_isEnabled) return;
 
     try {
-      // 限制歌词长度，避免显示过长
-      String displayText = text.length > 100 ? '${text.substring(0, 100)}...' : text;
+      // 移除长度限制，让macOS原生端根据歌词长度自适应窗口宽度
+      // 但仍然保留一个合理的上限，避免极端情况
+      String displayText = text.length > 200 ? '${text.substring(0, 200)}...' : text;
       
       await _channel.invokeMethod('updateDesktopLyrics', {
         'text': displayText,
@@ -389,8 +391,56 @@ class DesktopLyricsManager {
   void _startUpdateTimer() {
     _stopUpdateTimer();
     _updateTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      // 定时器主要用于处理歌词同步，实际位置更新由播放器驱动
+      // 定时器用于处理歌词同步，确保悬浮歌词能够实时更新
+      if (_isEnabled && _isVisible && _lyrics.isNotEmpty) {
+        _updateCurrentLyric();
+      }
     });
+  }
+
+  /// 更新当前歌词（内部方法）
+  void _updateCurrentLyric() {
+    if (_lyrics.isEmpty) {
+      _setCurrentLyric('♪ 暂无歌词');
+      return;
+    }
+
+    // 查找当前时间对应的歌词
+    int newIndex = -1;
+    for (int i = 0; i < _lyrics.length; i++) {
+      if (_currentPosition >= _lyrics[i].timestamp) {
+        newIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    // 如果歌词索引发生变化，更新显示
+    if (newIndex >= 0 && newIndex < _lyrics.length) {
+      final lyricLine = _lyrics[newIndex];
+      
+      // 悬浮歌词显示多行，处理所有文本行
+      String lyricText = '';
+      if (lyricLine.texts.isNotEmpty) {
+        // 将所有非空行连接起来
+        final nonEmptyTexts = lyricLine.texts
+            .map((text) => text.trim())
+            .where((text) => text.isNotEmpty)
+            .toList();
+        
+        if (nonEmptyTexts.isNotEmpty) {
+          lyricText = nonEmptyTexts.join('\n');
+        }
+      }
+      
+      if (lyricText.isNotEmpty) {
+        _setCurrentLyric(lyricText);
+      } else {
+        _setCurrentLyric('♪ ...');
+      }
+    } else {
+      _setCurrentLyric('♪ 暂无歌词');
+    }
   }
 
   /// 停止更新定时器

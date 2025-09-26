@@ -156,28 +156,63 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
     }
     
     private func dispose(result: @escaping FlutterResult) {
-        let commandCenter = MPRemoteCommandCenter.shared()
-        commandCenter.playCommand.removeTarget(nil)
-        commandCenter.pauseCommand.removeTarget(nil)
-        commandCenter.nextTrackCommand.removeTarget(nil)
-        commandCenter.previousTrackCommand.removeTarget(nil)
-        
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        
-        // 清理状态栏项目
-        if let statusItem = statusItem {
-            NSStatusBar.system.removeStatusItem(statusItem)
-            self.statusItem = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { 
+                result(nil)
+                return 
+            }
+            
+            // 清理 MPRemoteCommandCenter 的 target
+            let commandCenter = MPRemoteCommandCenter.shared()
+            commandCenter.playCommand.removeTarget(self)
+            commandCenter.pauseCommand.removeTarget(self)
+            commandCenter.nextTrackCommand.removeTarget(self)
+            commandCenter.previousTrackCommand.removeTarget(self)
+            
+            // 清理 MPNowPlayingInfoCenter
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            
+            // 清理状态栏项目
+            if let statusItem = self.statusItem {
+                NSStatusBar.system.removeStatusItem(statusItem)
+                self.statusItem = nil
+            }
+            
+            // 清理桌面歌词窗口
+            if let window = self.desktopLyricsWindow {
+                // 清理手势识别器
+                if let contentView = window.contentView {
+                    contentView.gestureRecognizers.forEach { recognizer in
+                        contentView.removeGestureRecognizer(recognizer)
+                    }
+                }
+                
+                // 清理按钮目标引用
+                self.clearButtonTargets(in: window.contentView)
+                
+                // 使用 orderOut 而不是 close
+                window.orderOut(nil)
+                
+                // 清理引用
+                self.desktopLyricsWindow = nil
+                self.desktopLyricsLabel = nil
+                self.playPauseButton = nil
+            }
+            
+            // 清理其他状态
+            self.statusBarLyricsEnabled = false
+            self.desktopLyricsEnabled = false
+            self.currentLyrics = ""
+            self.currentSongTitle = ""
+            self.currentArtist = ""
+            self.nowPlayingInfo.removeAll()
+            self.desktopLyricsStyle.removeAll()
+            
+            // 清理 channel 引用
+            self.channel = nil
+            
+            result(nil)
         }
-        
-        // 清理桌面悬浮歌词窗口
-        if let window = desktopLyricsWindow {
-            window.close()
-            self.desktopLyricsWindow = nil
-            self.desktopLyricsLabel = nil
-        }
-        
-        result(nil)
     }
     
     // MARK: - 状态栏歌词相关方法
@@ -256,12 +291,21 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
                     statusItem.button?.title = "♪ \(self.currentSongTitle)"
                 }
             } else {
+                // 状态栏歌词只显示第一行，处理多行歌词的情况
+                let lines = self.currentLyrics.components(separatedBy: .newlines)
+                let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                
                 // 限制歌词长度，避免状态栏过长
                 let maxLength = 50
-                let displayLyrics = self.currentLyrics.count > maxLength 
-                    ? String(self.currentLyrics.prefix(maxLength)) + "..."
-                    : self.currentLyrics
-                statusItem.button?.title = "♪ \(displayLyrics)"
+                let displayLyrics = firstLine.count > maxLength 
+                    ? String(firstLine.prefix(maxLength)) + "..."
+                    : firstLine
+                
+                if displayLyrics.isEmpty {
+                    statusItem.button?.title = "♪ ..."
+                } else {
+                    statusItem.button?.title = "♪ \(displayLyrics)"
+                }
             }
             
             // 更新菜单中的歌曲信息
@@ -294,13 +338,31 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
     private func disableDesktopLyrics(result: @escaping FlutterResult) {
         desktopLyricsEnabled = false
         
-        if let window = desktopLyricsWindow {
-            window.close()
-            self.desktopLyricsWindow = nil
-            self.desktopLyricsLabel = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if let window = self.desktopLyricsWindow {
+                // 清理手势识别器
+                if let contentView = window.contentView {
+                    contentView.gestureRecognizers.forEach { recognizer in
+                        contentView.removeGestureRecognizer(recognizer)
+                    }
+                }
+                
+                // 清理按钮目标引用
+                self.clearButtonTargets(in: window.contentView)
+                
+                // 使用 orderOut 而不是 close 来避免内存问题
+                window.orderOut(nil)
+                
+                // 清理引用
+                self.desktopLyricsWindow = nil
+                self.desktopLyricsLabel = nil
+                self.playPauseButton = nil
+            }
+            
+            result(nil)
         }
-        
-        result(nil)
     }
     
     private func updateDesktopLyrics(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -345,7 +407,6 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
     private func createDesktopLyricsWindow() {
         // 获取屏幕尺寸
         guard let screen = NSScreen.main else { return }
-        let screenFrame = screen.frame
         
         // 获取样式配置
         let fontSize = desktopLyricsStyle["fontSize"] as? Double ?? 24.0
@@ -353,11 +414,30 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
         let backgroundColor = desktopLyricsStyle["backgroundColor"] as? String ?? "#80000000"
         let _ = desktopLyricsStyle["initialPosition"] as? String ?? "center-top"
         
-        // 计算初始位置：屏幕水平居中，顶部距离上边界10%
-        let windowWidth: Double = 500
+        // 动态计算窗口宽度
+        let windowWidth = calculateOptimalWindowWidth(for: currentLyrics, fontSize: fontSize)
         let windowHeight: Double = 80
-        let x = (screenFrame.width - windowWidth) / 2
-        let y = screenFrame.height * 0.9 - windowHeight // 距离顶部10%
+        
+        // 获取可见屏幕区域（排除菜单栏和Dock）
+        let visibleFrame = screen.visibleFrame
+        
+        // 计算初始位置 - 屏幕中心偏上
+        var x = (visibleFrame.width - windowWidth) / 2 + visibleFrame.minX
+        var y = visibleFrame.maxY - windowHeight - 100 // 距离顶部100像素
+        
+        // 确保窗口在可见区域内
+        if x < visibleFrame.minX {
+            x = visibleFrame.minX + 10
+        }
+        if x + windowWidth > visibleFrame.maxX {
+            x = visibleFrame.maxX - windowWidth - 10
+        }
+        if y < visibleFrame.minY {
+            y = visibleFrame.minY + 10
+        }
+        if y + windowHeight > visibleFrame.maxY {
+            y = visibleFrame.maxY - windowHeight - 10
+        }
         
         // 创建窗口 - 增加宽度以容纳控制按钮
         let windowFrame = NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
@@ -387,8 +467,9 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
         backgroundView.layer?.backgroundColor = hexToNSColor(backgroundColor).cgColor
         backgroundView.layer?.cornerRadius = 8
         
-        // 创建歌词标签
-        let label = NSTextField(frame: NSRect(x: 10, y: 40, width: 480, height: 30))
+        // 创建歌词标签 - 使用动态宽度，支持多行显示
+        let labelWidth = windowWidth - 20 // 左右各留10像素边距
+        let label = NSTextField(frame: NSRect(x: 10, y: 40, width: labelWidth, height: 30))
         label.isEditable = false
         label.isSelectable = false
         label.isBordered = false
@@ -398,18 +479,29 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
         label.alignment = .center
         label.stringValue = currentLyrics.isEmpty ? "♪ 暂无歌词" : currentLyrics
         
-        // 创建控制按钮容器
-        let controlsView = NSView(frame: NSRect(x: 0, y: 5, width: 500, height: 30))
+        // 启用多行显示
+        label.maximumNumberOfLines = 0 // 0表示不限制行数
+        label.lineBreakMode = .byWordWrapping
+        label.usesSingleLineMode = false
+        
+        // 创建播放控制按钮容器 - 居中布局，只包含播放控件
+        let controlsView = NSView(frame: NSRect(x: 0, y: 5, width: windowWidth, height: 30))
+        
+        // 计算播放控件位置 - 居中布局（只有3个播放控件）
+        let buttonWidth: Double = 30
+        let buttonSpacing: Double = 10
+        let playbackButtonsWidth = buttonWidth * 3 + buttonSpacing * 2 // 3个播放按钮，2个间距
+        let playbackStartX = (windowWidth - playbackButtonsWidth) / 2
         
         // 上一曲按钮
-        let prevButton = NSButton(frame: NSRect(x: 150, y: 0, width: 30, height: 30))
+        let prevButton = NSButton(frame: NSRect(x: playbackStartX, y: 0, width: buttonWidth, height: 30))
         prevButton.title = "⏮"
         prevButton.bezelStyle = .circular
         prevButton.target = self
         prevButton.action = #selector(previousTrack)
         
         // 播放/暂停按钮
-        let playPauseButton = NSButton(frame: NSRect(x: 190, y: 0, width: 30, height: 30))
+        let playPauseButton = NSButton(frame: NSRect(x: playbackStartX + buttonWidth + buttonSpacing, y: 0, width: buttonWidth, height: 30))
         playPauseButton.title = isPlaying ? "⏸" : "▶"
         playPauseButton.bezelStyle = .circular
         playPauseButton.target = self
@@ -419,14 +511,15 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
         self.playPauseButton = playPauseButton
         
         // 下一曲按钮
-        let nextButton = NSButton(frame: NSRect(x: 230, y: 0, width: 30, height: 30))
+        let nextButton = NSButton(frame: NSRect(x: playbackStartX + (buttonWidth + buttonSpacing) * 2, y: 0, width: buttonWidth, height: 30))
         nextButton.title = "⏭"
         nextButton.bezelStyle = .circular
         nextButton.target = self
         nextButton.action = #selector(nextTrack)
         
-        // 关闭按钮
-        let closeButton = NSButton(frame: NSRect(x: 460, y: 0, width: 30, height: 30))
+        // 关闭按钮 - 固定在右下角
+        let closeButtonSize: Double = 20
+        let closeButton = NSButton(frame: NSRect(x: windowWidth - closeButtonSize - 5, y: 5, width: closeButtonSize, height: closeButtonSize))
         closeButton.title = "✕"
         closeButton.bezelStyle = .circular
         closeButton.target = self
@@ -453,11 +546,67 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
     }
     
     private func updateDesktopLyricsDisplay() {
-        guard desktopLyricsEnabled, let label = desktopLyricsLabel else { return }
+        guard desktopLyricsEnabled, let label = desktopLyricsLabel, let window = desktopLyricsWindow else { return }
         
         DispatchQueue.main.async {
             let displayText = self.currentLyrics.isEmpty ? "♪ 暂无歌词" : self.currentLyrics
             label.stringValue = displayText
+            
+            // 获取当前字体大小
+            let fontSize = self.desktopLyricsStyle["fontSize"] as? Double ?? 16.0
+            
+            // 计算歌词行数
+            let lineCount = max(1, displayText.components(separatedBy: "\n").count)
+            
+            // 计算新的窗口尺寸
+            let newWidth = self.calculateOptimalWindowWidth(for: displayText, fontSize: fontSize)
+            let lineHeight: CGFloat = fontSize * 1.4 // 行高为字体大小的1.4倍
+            let lyricHeight = lineHeight * CGFloat(lineCount)
+            let newHeight = lyricHeight + 40 // 歌词高度 + 控制按钮区域(30) + 边距(10)
+            
+            let currentFrame = window.frame
+            let sizeChanged = abs(currentFrame.width - newWidth) > 0.5 || abs(currentFrame.height - newHeight) > 0.5
+            
+            // 如果窗口尺寸发生变化，调整窗口大小和位置
+            if sizeChanged {
+                // 以当前窗口中心为锚点，自适应向上下左右动态扩展
+                let centerX = currentFrame.midX
+                let centerY = currentFrame.midY
+                
+                // 获取屏幕边界
+                let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
+                
+                // 计算新窗口位置，确保窗口不会超出屏幕边界
+                var newX = centerX - newWidth / 2
+                var newY = centerY - newHeight / 2
+                
+                // 检查左边界
+                if newX < screenFrame.minX {
+                    newX = screenFrame.minX + 10 // 留10像素边距
+                }
+                // 检查右边界
+                if newX + newWidth > screenFrame.maxX {
+                    newX = screenFrame.maxX - newWidth - 10 // 留10像素边距
+                }
+                // 检查下边界
+                if newY < screenFrame.minY {
+                    newY = screenFrame.minY + 10 // 留10像素边距
+                }
+                // 检查上边界
+                if newY + newHeight > screenFrame.maxY {
+                    newY = screenFrame.maxY - newHeight - 10 // 留10像素边距
+                }
+                
+                let newFrame = NSRect(x: newX, y: newY, width: newWidth, height: newHeight)
+                window.setFrame(newFrame, display: true, animate: true)
+                
+                // 更新歌词标签的位置和大小
+                let labelY: CGFloat = 30 // 控制按钮高度(20) + 间距(10)
+                label.frame = NSRect(x: 10, y: labelY, width: newWidth - 20, height: lyricHeight)
+            }
+            
+            // 始终更新按钮位置，确保关闭按钮在正确位置
+            self.updateButtonPositions(windowWidth: sizeChanged ? newWidth : currentFrame.width)
             
             // 更新样式
             if let fontSize = self.desktopLyricsStyle["fontSize"] as? Double {
@@ -469,6 +618,39 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
             if let backgroundColor = self.desktopLyricsStyle["backgroundColor"] as? String,
                let backgroundView = label.superview {
                 backgroundView.layer?.backgroundColor = self.hexToNSColor(backgroundColor).cgColor
+            }
+        }
+    }
+    
+    /// 更新按钮位置，确保关闭按钮始终在右下角
+    private func updateButtonPositions(windowWidth: CGFloat) {
+        guard let label = desktopLyricsLabel, let backgroundView = label.superview else { return }
+        
+        let buttonY: CGFloat = 5
+        let buttonSpacing: CGFloat = 10
+        let buttonWidth: CGFloat = 30
+        let closeButtonSize: CGFloat = 20
+        
+        // 计算播放控件的居中位置（3个播放按钮）
+        let playbackButtonsWidth: CGFloat = buttonWidth * 3 + buttonSpacing * 2
+        let playbackStartX = (windowWidth - playbackButtonsWidth) / 2
+        
+        // 重新定位所有按钮
+        var playbackButtonIndex = 0
+        for subview in backgroundView.subviews {
+            if let button = subview as? NSButton, button != label {
+                // 检查是否为关闭按钮（通过标题判断）
+                if button.title == "✕" {
+                    // 关闭按钮固定在右下角
+                    button.frame = NSRect(x: windowWidth - closeButtonSize - 5, y: buttonY, width: closeButtonSize, height: closeButtonSize)
+                } else {
+                    // 播放控件居中布局
+                    if playbackButtonIndex < 3 {
+                        let buttonX = playbackStartX + CGFloat(playbackButtonIndex) * (buttonWidth + buttonSpacing)
+                        button.frame = NSRect(x: buttonX, y: buttonY, width: buttonWidth, height: buttonWidth)
+                        playbackButtonIndex += 1
+                    }
+                }
             }
         }
     }
@@ -520,8 +702,19 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
             guard let self = self else { return }
             
             if let window = self.desktopLyricsWindow {
+                // 清理手势识别器
+                if let contentView = window.contentView {
+                    contentView.gestureRecognizers.forEach { recognizer in
+                        contentView.removeGestureRecognizer(recognizer)
+                    }
+                }
+                
+                // 清理按钮目标引用
+                self.clearButtonTargets(in: window.contentView)
+                
                 // 先隐藏窗口
                 window.orderOut(nil)
+                
                 // 清理引用
                 self.desktopLyricsWindow = nil
                 self.desktopLyricsLabel = nil
@@ -532,6 +725,21 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
             
             // 通知 Flutter 端悬浮歌词已被关闭
             self.channel?.invokeMethod("onDesktopLyricsDisabled", arguments: nil)
+        }
+    }
+    
+    // 清理按钮目标引用的辅助方法
+    private func clearButtonTargets(in view: NSView?) {
+        guard let view = view else { return }
+        
+        // 递归清理所有子视图中的按钮
+        for subview in view.subviews {
+            if let button = subview as? NSButton {
+                button.target = nil
+                button.action = nil
+            }
+            // 递归处理子视图
+            clearButtonTargets(in: subview)
         }
     }
     
@@ -568,5 +776,32 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
             blue: CGFloat(rgb & 0x0000FF) / 255.0,
             alpha: alpha
         )
+    }
+    
+    // 计算基于歌词长度的最佳窗口宽度
+    private func calculateOptimalWindowWidth(for lyrics: String, fontSize: Double) -> Double {
+        let displayText = lyrics.isEmpty ? "♪ 暂无歌词" : lyrics
+        
+        // 创建临时字体来测量文本宽度
+        let font = NSFont.systemFont(ofSize: fontSize)
+        let attributes = [NSAttributedString.Key.font: font]
+        let textSize = displayText.size(withAttributes: attributes)
+        
+        // 计算所需的文本宽度
+        let textWidth = textSize.width
+        
+        // 添加边距和控制按钮所需的空间
+        let horizontalPadding: Double = 40 // 左右各20像素边距
+        let controlButtonsWidth: Double = 150 // 控制按钮区域宽度（4个按钮+间距）
+        
+        // 计算最终窗口宽度
+        let minWidth: Double = 300 // 最小宽度，确保控制按钮有足够空间
+        let maxWidth: Double = 800 // 最大宽度，避免窗口过宽
+        
+        // 取文本宽度和控制按钮宽度的较大值，再加上边距
+        let requiredWidth = max(textWidth + horizontalPadding, controlButtonsWidth + horizontalPadding)
+        
+        // 确保宽度在合理范围内
+        return max(minWidth, min(maxWidth, requiredWidth))
     }
 }

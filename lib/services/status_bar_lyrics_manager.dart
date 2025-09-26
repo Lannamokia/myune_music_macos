@@ -213,9 +213,24 @@ class StatusBarLyricsManager {
       
       if (newIndex >= 0 && newIndex < _lyrics.length) {
         final lyricLine = _lyrics[newIndex];
-        final lyricText = lyricLine.texts.isNotEmpty 
-            ? lyricLine.texts.first 
-            : '';
+        
+        // 状态栏歌词只显示第一行，确保处理逻辑稳定
+        String lyricText = '';
+        if (lyricLine.texts.isNotEmpty) {
+          // 获取第一行歌词文本
+          lyricText = lyricLine.texts.first.trim();
+          
+          // 如果第一行为空，尝试获取第一个非空行
+          if (lyricText.isEmpty && lyricLine.texts.length > 1) {
+            for (String text in lyricLine.texts) {
+              final trimmedText = text.trim();
+              if (trimmedText.isNotEmpty) {
+                lyricText = trimmedText;
+                break;
+              }
+            }
+          }
+        }
         
         if (lyricText.isNotEmpty) {
           _setCurrentLyric('♪ $lyricText');

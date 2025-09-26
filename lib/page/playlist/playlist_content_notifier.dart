@@ -392,6 +392,12 @@ class PlaylistContentNotifier extends ChangeNotifier {
     _mediaPlayer.stream.position.listen((position) {
       _currentPosition = position; // 更新当前位置
       updateLyricLine(position);
+      
+      // 确保悬浮歌词能够实时更新
+      if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+        _desktopLyricsManager!.updatePosition(position);
+      }
+      
       _smtcManager?.updateTimeline(
         position: position,
         duration: _totalDuration,
