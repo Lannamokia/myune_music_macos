@@ -11,6 +11,7 @@ import './settings_provider.dart';
 import '../../widgets/font_selector_row.dart';
 import 'update_checker.dart';
 import 'audio_device_selector.dart';
+import '../../services/desktop_lyrics_manager.dart';
 
 // 定义应用版本号常量
 const String appVersion = '0.6.4';
@@ -294,6 +295,170 @@ class _SettingPageState extends State<SettingPage> {
             context.read<SettingsProvider>().setEnableOnlineLyrics(value);
           },
         ),
+        // 状态栏歌词开关
+        if (Platform.isMacOS)
+          SwitchListTile(
+            title: const Row(
+              children: [
+                Text('启用状态栏歌词'),
+                SizedBox(width: 4),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                  icon: Icon(Icons.info_outline, size: 20),
+                  tooltip: '在macOS状态栏显示当前播放的歌词\n仅在macOS系统上可用',
+                  onPressed: null,
+                ),
+              ],
+            ),
+            value: settings.enableStatusBarLyrics,
+            onChanged: (value) {
+              context.read<SettingsProvider>().setEnableStatusBarLyrics(value);
+              
+              // 启用或禁用状态栏歌词管理器
+              final playlistNotifier = context.read<PlaylistContentNotifier>();
+              if (playlistNotifier.statusBarLyricsManager != null) {
+                if (value) {
+                  playlistNotifier.statusBarLyricsManager!.enable();
+                } else {
+                  playlistNotifier.statusBarLyricsManager!.disable();
+                }
+              }
+            },
+          ),
+        // 桌面悬浮歌词开关
+        if (Platform.isMacOS)
+          SwitchListTile(
+            title: const Row(
+              children: [
+                Text('启用桌面悬浮歌词'),
+                SizedBox(width: 4),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                  icon: Icon(Icons.info_outline, size: 20),
+                  tooltip: '在桌面显示悬浮歌词窗口\n可拖拽移动位置，仅在macOS系统上可用',
+                  onPressed: null,
+                ),
+              ],
+            ),
+            value: settings.enableDesktopLyrics,
+            onChanged: (value) async {
+              context.read<SettingsProvider>().setEnableDesktopLyrics(value);
+              
+              // 启用或禁用桌面悬浮歌词管理器
+              final playlistNotifier = context.read<PlaylistContentNotifier>();
+              if (playlistNotifier.desktopLyricsManager != null) {
+                try {
+                  if (value) {
+                    await playlistNotifier.desktopLyricsManager!.enable(delaySeconds: 1);
+                  } else {
+                    await playlistNotifier.desktopLyricsManager!.disable();
+                  }
+                } catch (e) {
+                  print('桌面悬浮歌词开关操作失败: $e');
+                  // 如果操作失败，恢复设置状态
+                  if (context.mounted) {
+                    context.read<SettingsProvider>().setEnableDesktopLyrics(!value);
+                  }
+                }
+              }
+            },
+          ),
+        // 桌面悬浮歌词配置
+        if (settings.enableDesktopLyrics) ...[
+          // 文字颜色选择
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('悬浮歌词文字颜色', style: Theme.of(context).textTheme.titleMedium),
+                GestureDetector(
+                  onTap: () {
+                    _showColorPicker(
+                      context,
+                      '选择文字颜色',
+                      settings.desktopLyricsTextColor,
+                      (color) {
+                        context.read<SettingsProvider>().setDesktopLyricsTextColor(color);
+                        // 更新桌面悬浮歌词管理器的颜色配置
+                        DesktopLyricsManager.instance.updateFromSettings();
+                      },
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: settings.desktopLyricsTextColor,
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 背景颜色选择
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('悬浮歌词背景颜色', style: Theme.of(context).textTheme.titleMedium),
+                GestureDetector(
+                  onTap: () {
+                    _showColorPicker(
+                      context,
+                      '选择背景颜色',
+                      settings.desktopLyricsBackgroundColor,
+                      (color) {
+                        context.read<SettingsProvider>().setDesktopLyricsBackgroundColor(color);
+                        // 更新桌面悬浮歌词管理器的颜色配置
+                        DesktopLyricsManager.instance.updateFromSettings();
+                      },
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: settings.desktopLyricsBackgroundColor,
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 字体大小
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('悬浮歌词字体大小', style: Theme.of(context).textTheme.titleMedium),
+                SizedBox(
+                  width: 320,
+                  child: Slider(
+                    value: settings.desktopLyricsFontSize,
+                    min: 12.0,
+                    max: 32.0,
+                    divisions: 20,
+                    label: '${settings.desktopLyricsFontSize.round()}',
+                    onChanged: (value) {
+                      context.read<SettingsProvider>().setDesktopLyricsFontSize(value);
+                      // 更新桌面悬浮歌词管理器的字体大小配置
+                      DesktopLyricsManager.instance.updateFromSettings();
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         // 歌词源选择
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -427,6 +592,101 @@ class _SettingPageState extends State<SettingPage> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showColorPicker(BuildContext context, String title, Color currentColor, Function(Color) onColorChanged) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        Color selectedColor = currentColor;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(title),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 预设颜色
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        Colors.white,
+                        Colors.black,
+                        Colors.red,
+                        Colors.green,
+                        Colors.blue,
+                        Colors.yellow,
+                        Colors.orange,
+                        Colors.purple,
+                        Colors.pink,
+                        Colors.cyan,
+                        Colors.grey,
+                        Colors.brown,
+                        Colors.black54,
+                        Colors.white70,
+                        Colors.transparent,
+                      ].map((color) {
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              selectedColor = color;
+                            });
+                          },
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: color,
+                              border: Border.all(
+                                color: selectedColor == color ? Colors.blue : Colors.grey,
+                                width: selectedColor == color ? 3 : 1,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: color == Colors.transparent
+                                ? const Icon(Icons.block, color: Colors.red)
+                                : null,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    // 当前选择的颜色预览
+                    Container(
+                      width: double.infinity,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: selectedColor,
+                        border: Border.all(color: Colors.grey),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: selectedColor == Colors.transparent
+                          ? const Center(child: Text('透明', style: TextStyle(color: Colors.black)))
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    onColorChanged(selectedColor);
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('确定'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'platform_media_service.dart';
 import 'windows_media_service.dart';
 import 'linux_media_service.dart';
+import 'macos_media_service.dart';
 
 class SmtcManager {
   final PlatformMediaService? _service;
@@ -42,6 +43,13 @@ class SmtcManager {
         onPrevious: onPrevious,
         onSeek: onSeek,
         onSetPosition: onSetPosition,
+      );
+    } else if (Platform.isMacOS) {
+      service = MacOSMediaService(
+        onPlay: onPlay,
+        onPause: onPause,
+        onNext: onNext,
+        onPrevious: onPrevious,
       );
     }
     return SmtcManager._internal(service);

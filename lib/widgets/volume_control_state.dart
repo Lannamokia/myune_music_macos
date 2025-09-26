@@ -16,10 +16,10 @@ class VolumeControl extends StatefulWidget {
   });
 
   @override
-  VolumeControlState createState() => VolumeControlState();
+  _VolumeControlState createState() => _VolumeControlState();
 }
 
-class VolumeControlState extends State<VolumeControl> {
+class _VolumeControlState extends State<VolumeControl> {
   @override
   void initState() {
     super.initState();
@@ -62,14 +62,36 @@ class VolumeControlState extends State<VolumeControl> {
           overlayOffset: const Offset(0, -170),
           overlayConstraints: const BoxConstraints(maxWidth: 40),
           overlayContentBuilder: (context) {
-            return _buildOverlayContent(playlistNotifier);
+            // 将滑块内容独立出来，不受Consumer重建影响
+            return _VolumeSliderWidget(
+              playlistNotifier: playlistNotifier,
+            );
           },
         );
       },
     );
   }
 
-  Widget _buildOverlayContent(PlaylistContentNotifier playlistNotifier) {
+}
+
+// 独立的音量滑块组件，不受外部Consumer重建影响
+class _VolumeSliderWidget extends StatefulWidget {
+  final PlaylistContentNotifier playlistNotifier;
+
+  const _VolumeSliderWidget({
+    required this.playlistNotifier,
+  });
+
+  @override
+  State<_VolumeSliderWidget> createState() => _VolumeSliderWidgetState();
+}
+
+class _VolumeSliderWidgetState extends State<_VolumeSliderWidget> {
+  double? _localVolume;
+  bool _isDragging = false;
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -91,11 +113,30 @@ class VolumeControlState extends State<VolumeControl> {
                   ),
                 ),
                 child: Slider(
-                  value: playlistNotifier.volume,
+                  value: _isDragging ? (_localVolume ?? widget.playlistNotifier.volume) : widget.playlistNotifier.volume,
                   min: 0,
                   max: 100,
                   onChanged: (value) {
-                    playlistNotifier.setVolume(value);
+                    setState(() {
+                      _localVolume = value;
+                      _isDragging = true;
+                    });
+                    // 拖动期间使用即时设置，不触发UI重建
+                    widget.playlistNotifier.setVolumeInstant(value);
+                  },
+                  onChangeStart: (value) {
+                    setState(() {
+                      _isDragging = true;
+                      _localVolume = widget.playlistNotifier.volume; // 使用当前音量作为起始值
+                    });
+                  },
+                  onChangeEnd: (value) {
+                    // 先设置最终音量，再重置状态
+                    widget.playlistNotifier.setVolume(value);
+                    setState(() {
+                      _isDragging = false;
+                      _localVolume = null;
+                    });
                   },
                 ),
               ),
@@ -103,7 +144,7 @@ class VolumeControlState extends State<VolumeControl> {
           ),
           const SizedBox(height: 6),
           Text(
-            '${(playlistNotifier.volume).round()}',
+            '${(_isDragging ? (_localVolume ?? widget.playlistNotifier.volume) : widget.playlistNotifier.volume).round()}',
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
           ),
         ],

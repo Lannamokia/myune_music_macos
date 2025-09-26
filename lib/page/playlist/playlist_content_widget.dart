@@ -632,12 +632,49 @@ class HeadSongListWidget extends StatelessWidget {
                                 !notifier
                                     .playlists[notifier.selectedIndex]
                                     .isFolderBased)
-                              ElevatedButton.icon(
-                                onPressed: () => context
-                                    .read<PlaylistContentNotifier>()
-                                    .pickAndAddSongs(),
-                                icon: const Icon(Icons.add_circle_outline),
-                                label: const Text('添加歌曲'),
+                              PopupMenuButton<String>(
+                                onSelected: (value) async {
+                                  final notifierContext = context.read<PlaylistContentNotifier>();
+                                  if (value == 'files') {
+                                    await notifierContext.pickAndAddSongs();
+                                  } else if (value == 'folders') {
+                                    await notifierContext.pickAndAddFolders();
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'files',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.audio_file),
+                                        SizedBox(width: 8),
+                                        Text('添加音频文件'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'folders',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.folder),
+                                        SizedBox(width: 8),
+                                        Text('添加文件夹'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                child: ElevatedButton.icon(
+                                  onPressed: null,
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  label: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text('添加歌曲'),
+                                      SizedBox(width: 4),
+                                      Icon(Icons.arrow_drop_down, size: 16),
+                                    ],
+                                  ),
+                                ),
                               ),
                             if (isPlaylistSelected)
                               IconButton(
@@ -678,6 +715,52 @@ class HeadSongListWidget extends StatelessWidget {
                       );
                     },
                   ),
+          ),
+          // 元数据处理进度显示
+          Consumer<PlaylistContentNotifier>(
+            builder: (context, notifier, child) {
+              if (!notifier.isProcessingMetadata) {
+                return const SizedBox.shrink();
+              }
+              
+              final progress = notifier.metadataProgress;
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.sync, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          '正在处理元数据...',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${(progress * 100).toInt()}%',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: progress,
+                      backgroundColor: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           // 只在列表本身变化时才重建

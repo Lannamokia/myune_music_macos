@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:math';
+import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
+import 'dart:collection';
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -19,6 +20,8 @@ import 'sort_options.dart';
 import '../../media_service/smtc_manager.dart';
 import '../setting/settings_provider.dart';
 import '../../theme/theme_provider.dart';
+import '../../services/status_bar_lyrics_manager.dart';
+import '../../services/desktop_lyrics_manager.dart';
 
 enum PlayMode { sequence, shuffle, repeatOne }
 
@@ -70,7 +73,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
   PlayMode get playMode => _playMode;
 
   List<int> _shuffledIndices = []; // 用于随机播放时的索引列表
-  final Random _random = Random(); // 用于打乱索引
+  final math.Random _random = math.Random(); // 用于打乱索引
 
   // --- 播放进度相关 ---
   Duration _currentPosition = Duration.zero; // 当前播放进度
@@ -159,6 +162,14 @@ class PlaylistContentNotifier extends ChangeNotifier {
   SmtcManager? _smtcManager;
   SmtcManager? get smtcManager => _smtcManager;
 
+  // --- 状态栏歌词 ---
+  StatusBarLyricsManager? _statusBarLyricsManager;
+  StatusBarLyricsManager? get statusBarLyricsManager => _statusBarLyricsManager;
+
+  // --- 桌面悬浮歌词 ---
+  DesktopLyricsManager? _desktopLyricsManager;
+  DesktopLyricsManager? get desktopLyricsManager => _desktopLyricsManager;
+
   // --- 音频设备相关 ---
   List<AudioDevice> _availableAudioDevices = [];
   AudioDevice? _selectedAudioDevice;
@@ -181,13 +192,29 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   // --- 消息通知 ---
   final StreamController<String> _errorStreamController =
-      StreamController<String>.broadcast(); // 错误信息流
-
+      StreamController<String>.broadcast();
   final StreamController<String> _infoStreamController =
-      StreamController<String>.broadcast(); // 普通信息流
+      StreamController<String>.broadcast();
 
   Stream<String> get errorStream => _errorStreamController.stream;
   Stream<String> get infoStream => _infoStreamController.stream;
+
+  // --- 目录访问权限管理 ---
+  final Set<String> _authorizedDirectories = <String>{};
+  final Map<String, DateTime> _directoryAccessCache = <String, DateTime>{};
+
+  // --- 异步元数据处理 ---
+  bool _isProcessingMetadata = false;
+  int _totalFilesToProcess = 0;
+  int _processedFiles = 0;
+  final int _maxConcurrentMetadataReads = 1; // 限制并发数量，降低CPU占用
+  
+  // --- UI更新防抖机制 ---
+  Timer? _uiUpdateTimer;
+  bool _pendingUIUpdate = false;
+  
+  bool get isProcessingMetadata => _isProcessingMetadata;
+  double get metadataProgress => _totalFilesToProcess > 0 ? _processedFiles / _totalFilesToProcess : 0.0;
 
   PlaylistContentNotifier(this._settingsProvider, this._themeProvider) {
     _setupMediaPlayerListeners(); // 设置 media-kit 的监听器
@@ -207,6 +234,65 @@ class PlaylistContentNotifier extends ChangeNotifier {
         await _mediaPlayer.seek(position);
       },
     );
+
+    // 初始化状态栏歌词管理器
+    _statusBarLyricsManager = StatusBarLyricsManager.instance;
+    
+    // 根据设置初始化状态栏歌词管理器的状态
+    if (_settingsProvider.enableStatusBarLyrics) {
+      _statusBarLyricsManager!.enable();
+    }
+
+    // 初始化桌面悬浮歌词管理器
+    _desktopLyricsManager = DesktopLyricsManager.instance;
+    _desktopLyricsManager!.setSettingsProvider(_settingsProvider);
+    
+    // 设置媒体控制回调
+    _desktopLyricsManager!.setOnMediaControl((action) {
+      switch (action) {
+        case 'togglePlayPause':
+          if (_isPlaying) {
+            pause();
+          } else {
+            play();
+          }
+          break;
+        case 'previous':
+          playPrevious();
+          break;
+        case 'next':
+          playNext();
+          break;
+      }
+    });
+    
+    // 根据设置初始化桌面悬浮歌词管理器的状态
+    if (_settingsProvider.enableDesktopLyrics) {
+      _desktopLyricsManager!.enable(delaySeconds: 2);
+    }
+    
+    // 定期清理目录访问权限缓存
+    Timer.periodic(const Duration(hours: 1), (timer) {
+      _cleanupDirectoryAccessCache();
+    });
+  }
+
+  // --- UI更新防抖机制 ---
+  void _debouncedNotifyListeners() {
+    _pendingUIUpdate = true;
+    _uiUpdateTimer?.cancel();
+    _uiUpdateTimer = Timer(const Duration(milliseconds: 100), () {
+      if (_pendingUIUpdate) {
+        _pendingUIUpdate = false;
+        notifyListeners();
+      }
+    });
+  }
+
+  void _immediateNotifyListeners() {
+    _uiUpdateTimer?.cancel();
+    _pendingUIUpdate = false;
+    notifyListeners();
   }
 
   Future<void> _initLogFile() async {
@@ -265,6 +351,13 @@ class PlaylistContentNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 即时设置音量，不触发notifyListeners，用于拖动期间
+  // 只更新媒体播放器音量，不更新_volume字段，避免Consumer重建
+  Future<void> setVolumeInstant(double newVolume) async {
+    final clampedVolume = newVolume.clamp(0.0, 100.0);
+    await _mediaPlayer.setVolume(clampedVolume);
+  }
+
   void toggleMute() {
     final isMuted = _volume < 1.0;
     final newVolume = isMuted ? _lastVolumeBeforeMute : 0.0;
@@ -313,6 +406,12 @@ class PlaylistContentNotifier extends ChangeNotifier {
         duration: duration,
       );
       // notifyListeners();
+    });
+
+    // 监听音量变化
+    _mediaPlayer.stream.volume.listen((volume) {
+      _volume = volume; // 更新内部音量状态
+      notifyListeners(); // 通知UI更新
     });
 
     _mediaPlayer.stream.error.listen((error) {
@@ -504,8 +603,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
     if (newSongPaths.isNotEmpty) {
       currentPlaylist.songFilePaths.addAll(newSongPaths);
       await _savePlaylists();
-      await _loadCurrentPlaylistSongs();
-      await _updateAllSongsList();
+      
+      // 异步处理元数据
+      await _processMetadataAsync(newSongPaths);
 
       _infoStreamController.add('成功添加 ${newSongPaths.length} 首歌曲');
 
@@ -520,6 +620,84 @@ class PlaylistContentNotifier extends ChangeNotifier {
     else {
       return false;
     }
+  }
+
+  /// 选择并添加文件夹中的音频文件
+  Future<bool> pickAndAddFolders() async {
+    if (_selectedIndex == -1) {
+      _infoStreamController.add('请先在左侧选择一个要添加歌曲的歌单');
+      return false;
+    }
+
+    // 选择文件夹
+    final selectedDirectory = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: '选择包含音频文件的文件夹',
+    );
+
+    if (selectedDirectory == null) {
+      return false; // 用户取消
+    }
+
+    final currentPlaylist = _playlists[_selectedIndex];
+    
+    // 扫描文件夹中的音频文件
+    final audioFiles = await _scanDirectoryForAudioFiles(selectedDirectory);
+    
+    if (audioFiles.isEmpty) {
+      _infoStreamController.add('所选文件夹中没有找到支持的音频文件');
+      return false;
+    }
+
+    // 过滤掉已存在的文件
+    final newSongPaths = audioFiles
+        .where((path) => !currentPlaylist.songFilePaths.contains(path))
+        .toList();
+
+    if (newSongPaths.isEmpty) {
+      _infoStreamController.add('所选文件夹中的音频文件已存在于当前歌单中');
+      return false;
+    }
+
+    // 先添加文件路径到播放列表
+    currentPlaylist.songFilePaths.addAll(newSongPaths);
+    await _savePlaylists();
+
+    // 异步处理元数据
+    await _processMetadataAsync(newSongPaths);
+
+    _infoStreamController.add('成功添加 ${newSongPaths.length} 首歌曲');
+    return true;
+  }
+
+  /// 扫描目录中的音频文件
+  Future<List<String>> _scanDirectoryForAudioFiles(String directoryPath) async {
+    final List<String> audioFiles = [];
+    
+    try {
+      final directory = Directory(directoryPath);
+      if (!await directory.exists()) return audioFiles;
+
+      // 检查目录访问权限
+      if (!_hasDirectoryAccess(directoryPath)) {
+        final hasAccess = await _requestDirectoryAccess(directoryPath);
+        if (!hasAccess) {
+          return audioFiles;
+        }
+      }
+
+      await for (final file in directory.list(recursive: true, followLinks: false)) {
+        if (file is File) {
+          final extension = p.extension(file.path).toLowerCase();
+          if (_supportedAudioExtensions.contains(extension)) {
+            audioFiles.add(file.path);
+          }
+        }
+      }
+    } catch (e) {
+      _errorStreamController.add('扫描文件夹时出错: $e');
+    }
+
+    return audioFiles;
   }
 
   bool addPlaylist(String name, {List<String>? folderPaths}) {
@@ -1076,7 +1254,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
           );
 
           // 先不设置独占模式，使用默认音频
-          await (_mediaPlayer.platform as dynamic).setProperty('ao', 'wasapi');
+          await (_mediaPlayer.platform as dynamic).setProperty('ao', 'coreaudio');
 
           // 监听播放状态，在开始播放后再启用独占模式
           if (_isExclusiveModeEnabled) {
@@ -1104,6 +1282,22 @@ class PlaylistContentNotifier extends ChangeNotifier {
       extractAndApplyDynamicColor(songToPlay.albumArt);
 
       await _mediaPlayer.play(); // 最后执行播放
+
+      // 更新状态栏歌词的歌曲信息
+      if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+        _statusBarLyricsManager!.updateSongInfo(
+          songToPlay.title,
+          songToPlay.artist,
+        );
+      }
+
+      // 更新桌面悬浮歌词的歌曲信息
+      if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+        _desktopLyricsManager!.updateSongInfo(
+          songToPlay.title,
+          songToPlay.artist,
+        );
+      }
 
       notifyListeners();
     } catch (e) {
@@ -1351,7 +1545,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     // 如果是随机排序
     if (criterion == SortCriterion.random) {
-      final random = Random();
+      final random = math.Random();
       final randomizedPaths = List<String>.from(paths);
       // dart 自带的列表元素随机排序
       randomizedPaths.shuffle(random);
@@ -1423,6 +1617,17 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
       if (metadata.lyrics != null && metadata.lyrics!.isNotEmpty) {
         _currentLyrics = _parseLrcContent([metadata.lyrics!]);
+        
+        // 更新状态栏歌词管理器的歌词数据
+        if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+          _statusBarLyricsManager!.updateLyrics(_currentLyrics);
+        }
+
+        // 更新桌面悬浮歌词管理器的歌词数据
+        if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+          _desktopLyricsManager!.updateLyrics(_currentLyrics);
+        }
+        
         notifyListeners();
         return;
       }
@@ -1436,17 +1641,25 @@ class PlaylistContentNotifier extends ChangeNotifier {
     final songFileNameWithoutExtension = p.basenameWithoutExtension(
       songFilePath,
     );
-    final lrcFilePath = p.join(
-      songDirectory,
-      '$songFileNameWithoutExtension.lrc',
-    );
+    
+    // 智能查找LRC文件
+    final lrcFile = await _findBestMatchingLrcFile(songDirectory, songFileNameWithoutExtension);
 
-    final lrcFile = File(lrcFilePath);
-
-    if (await lrcFile.exists()) {
+    if (lrcFile != null) {
       try {
         final lines = await lrcFile.readAsLines();
         _currentLyrics = _parseLrcContent(lines);
+        
+        // 更新状态栏歌词管理器的歌词数据
+        if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+          _statusBarLyricsManager!.updateLyrics(_currentLyrics);
+        }
+
+        // 更新桌面悬浮歌词管理器的歌词数据
+        if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+          _desktopLyricsManager!.updateLyrics(_currentLyrics);
+        }
+        
         notifyListeners();
         return;
       } catch (e) {
@@ -1596,6 +1809,17 @@ class PlaylistContentNotifier extends ChangeNotifier {
     } catch (e) {
       _currentLyrics = [];
     }
+
+    // 更新状态栏歌词管理器的歌词数据
+    if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+      _statusBarLyricsManager!.updateLyrics(_currentLyrics);
+    }
+
+    // 更新桌面悬浮歌词管理器的歌词数据
+    if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+      _desktopLyricsManager!.updateLyrics(_currentLyrics);
+    }
+
     notifyListeners();
   }
 
@@ -1706,6 +1930,17 @@ class PlaylistContentNotifier extends ChangeNotifier {
     } catch (e) {
       _currentLyrics = [];
     }
+
+    // 更新状态栏歌词管理器的歌词数据
+    if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+      _statusBarLyricsManager!.updateLyrics(_currentLyrics);
+    }
+
+    // 更新桌面悬浮歌词管理器的歌词数据
+    if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+      _desktopLyricsManager!.updateLyrics(_currentLyrics);
+    }
+
     notifyListeners();
   }
 
@@ -1797,6 +2032,16 @@ class PlaylistContentNotifier extends ChangeNotifier {
     if (newIndex != _currentLyricLineIndex) {
       _currentLyricLineIndex = newIndex;
       _lyricLineIndexController.add(newIndex); // 广播新索引
+      
+      // 更新状态栏歌词
+      if (_statusBarLyricsManager != null && _settingsProvider.enableStatusBarLyrics) {
+        _statusBarLyricsManager!.updatePosition(currentPosition);
+      }
+
+      // 更新桌面悬浮歌词
+      if (_desktopLyricsManager != null && _settingsProvider.enableDesktopLyrics) {
+        _desktopLyricsManager!.updatePosition(currentPosition);
+      }
     }
   }
 
@@ -2316,11 +2561,32 @@ class PlaylistContentNotifier extends ChangeNotifier {
     );
     savedOrder.addAll(newPaths);
 
-    // 解析元数据
+    // 优化：利用已解析的歌曲数据，避免重复解析
     final List<Song> songsWithMetadata = [];
+    final Map<String, Song> existingSongsMap = {};
+    
+    // 构建现有歌曲的映射表
+    for (final song in _allSongs) {
+      existingSongsMap[song.filePath] = song;
+    }
+    
+    // 从各个播放列表中收集已解析的歌曲
+    for (final playlist in _playlists) {
+      if (playlist.songs != null) {
+        for (final song in playlist.songs!) {
+          existingSongsMap[song.filePath] = song;
+        }
+      }
+    }
+    
+    // 只解析新歌曲的元数据
     for (final path in savedOrder) {
-      final song = await _parseSongMetadata(path);
-      songsWithMetadata.add(song);
+      if (existingSongsMap.containsKey(path)) {
+        songsWithMetadata.add(existingSongsMap[path]!);
+      } else {
+        final song = await _parseSongMetadata(path);
+        songsWithMetadata.add(song);
+      }
     }
     _allSongs = songsWithMetadata;
 
@@ -2514,5 +2780,303 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   void postInfo(String infoMessage) {
     _infoStreamController.add(infoMessage);
+  }
+
+  /// 计算两个字符串的相似度（使用Levenshtein距离算法）
+  /// 返回值范围：0.0 - 1.0，1.0表示完全相同
+  double _calculateSimilarity(String str1, String str2) {
+    if (str1 == str2) return 1.0;
+    if (str1.isEmpty || str2.isEmpty) return 0.0;
+
+    // 转换为小写进行比较
+    final s1 = str1.toLowerCase();
+    final s2 = str2.toLowerCase();
+
+    final len1 = s1.length;
+    final len2 = s2.length;
+    final maxLen = math.max(len1, len2);
+
+    // 创建距离矩阵
+    final matrix = List.generate(len1 + 1, (i) => List.filled(len2 + 1, 0));
+
+    // 初始化第一行和第一列
+    for (int i = 0; i <= len1; i++) {
+      matrix[i][0] = i;
+    }
+    for (int j = 0; j <= len2; j++) {
+      matrix[0][j] = j;
+    }
+
+    // 计算编辑距离
+    for (int i = 1; i <= len1; i++) {
+      for (int j = 1; j <= len2; j++) {
+        final cost = s1[i - 1] == s2[j - 1] ? 0 : 1;
+        matrix[i][j] = math.min(
+          math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
+          matrix[i - 1][j - 1] + cost,
+        );
+      }
+    }
+
+    final distance = matrix[len1][len2];
+    return 1.0 - (distance / maxLen);
+  }
+
+  /// 智能查找最匹配的LRC文件
+  /// 支持忽略扩展名大小写，基于文件名相似度匹配
+  Future<File?> _findBestMatchingLrcFile(String directory, String songFileName) async {
+    try {
+      final dir = Directory(directory);
+      if (!await dir.exists()) return null;
+
+      // 检查目录访问权限
+      if (!_hasDirectoryAccess(directory)) {
+        // 请求目录访问权限
+        final hasAccess = await _requestDirectoryAccess(directory);
+        if (!hasAccess) {
+          // debugPrint('无法获取目录访问权限：$directory');
+          return null;
+        }
+      }
+
+      // 获取目录下所有文件
+      final files = await dir.list().toList();
+      
+      // 筛选出所有LRC文件（忽略大小写）
+      final lrcFiles = files
+          .where((entity) => entity is File)
+          .cast<File>()
+          .where((file) {
+            final fileName = p.basename(file.path).toLowerCase();
+            return fileName.endsWith('.lrc');
+          })
+          .toList();
+
+      if (lrcFiles.isEmpty) return null;
+
+      // 如果只有一个LRC文件，直接返回
+      if (lrcFiles.length == 1) {
+        return lrcFiles.first;
+      }
+
+      // 计算每个LRC文件与歌曲文件名的相似度
+      double bestSimilarity = 0.0;
+      File? bestMatch;
+
+      for (final lrcFile in lrcFiles) {
+        final lrcFileName = p.basenameWithoutExtension(lrcFile.path);
+        final similarity = _calculateSimilarity(songFileName, lrcFileName);
+
+        // 如果相似度超过80%且是目前最高的，则记录
+        if (similarity >= 0.8 && similarity > bestSimilarity) {
+          bestSimilarity = similarity;
+          bestMatch = lrcFile;
+        }
+      }
+
+      return bestMatch;
+    } catch (e) {
+      // debugPrint('查找LRC文件时出错：$e');
+      return null;
+    }
+  }
+
+  /// 请求目录访问权限
+  /// 在macOS沙盒环境中，需要用户明确授权才能访问目录
+  Future<bool> _requestDirectoryAccess(String directoryPath) async {
+    try {
+      // 检查是否已经有权限
+      if (_authorizedDirectories.contains(directoryPath)) {
+        return true;
+      }
+
+      // 检查缓存，避免频繁请求
+      final cacheTime = _directoryAccessCache[directoryPath];
+      if (cacheTime != null && 
+          DateTime.now().difference(cacheTime).inMinutes < 30) {
+        return _authorizedDirectories.contains(directoryPath);
+      }
+
+      // 使用FilePicker请求目录访问权限
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '请授权访问音乐文件所在目录以加载歌词文件',
+        initialDirectory: directoryPath,
+      );
+
+      if (selectedDirectory != null) {
+        // 检查选择的目录是否是我们需要的目录或其父目录
+        if (directoryPath.startsWith(selectedDirectory) || 
+            selectedDirectory.startsWith(directoryPath)) {
+          _authorizedDirectories.add(directoryPath);
+          _authorizedDirectories.add(selectedDirectory);
+          _directoryAccessCache[directoryPath] = DateTime.now();
+          _directoryAccessCache[selectedDirectory] = DateTime.now();
+          return true;
+        }
+      }
+
+      _directoryAccessCache[directoryPath] = DateTime.now();
+      return false;
+    } catch (e) {
+      // debugPrint('请求目录访问权限失败：$e');
+      _directoryAccessCache[directoryPath] = DateTime.now();
+      return false;
+    }
+  }
+
+  /// 检查是否有目录访问权限
+  bool _hasDirectoryAccess(String directoryPath) {
+    // 检查是否已授权
+    if (_authorizedDirectories.contains(directoryPath)) {
+      return true;
+    }
+
+    // 检查是否有父目录的权限
+    for (final authorizedDir in _authorizedDirectories) {
+      if (directoryPath.startsWith(authorizedDir)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// 清理过期的目录访问缓存
+  void _cleanupDirectoryAccessCache() {
+    final now = DateTime.now();
+    final expiredKeys = _directoryAccessCache.entries
+        .where((entry) => now.difference(entry.value).inHours > 24)
+        .map((entry) => entry.key)
+        .toList();
+
+    for (final key in expiredKeys) {
+       _directoryAccessCache.remove(key);
+       _authorizedDirectories.remove(key);
+     }
+   }
+
+  /// 异步处理元数据，先添加到列表再逐个读取元数据
+  Future<void> _processMetadataAsync(List<String> filePaths) async {
+    if (filePaths.isEmpty) return;
+
+    _isProcessingMetadata = true;
+    _totalFilesToProcess = filePaths.length;
+    _processedFiles = 0;
+    notifyListeners();
+
+    try {
+      // 先创建基础的Song对象（只有文件路径）并添加到列表
+      final List<Song> tempSongs = filePaths.map((path) => Song(
+        title: p.basenameWithoutExtension(path),
+        artist: '未知艺术家',
+        album: '未知专辑',
+        filePath: path,
+        duration: Duration.zero,
+      )).toList();
+
+      // 立即更新UI显示
+      final currentPlaylist = _playlists[_selectedIndex];
+      if (currentPlaylist.songs == null) {
+        currentPlaylist.songs = [];
+      }
+      currentPlaylist.songs!.addAll(tempSongs);
+      
+      await _loadCurrentPlaylistSongs();
+      await _updateAllSongsList();
+      notifyListeners();
+
+      // 使用信号量限制并发数量
+      final semaphore = Semaphore(_maxConcurrentMetadataReads);
+      final List<Future<void>> futures = [];
+
+      for (int i = 0; i < filePaths.length; i++) {
+        final filePath = filePaths[i];
+        final tempSong = tempSongs[i];
+        
+        futures.add(semaphore.acquire().then((_) async {
+          try {
+            // 检查播放状态，如果正在播放则等待
+            while (_isPlaying) {
+              await Future.delayed(Duration(milliseconds: 100));
+            }
+            
+            // 读取真实的元数据
+            final realSong = await _parseSongMetadata(filePath);
+            
+            // 更新对应的Song对象
+            final songIndex = currentPlaylist.songs!.indexWhere(
+              (song) => song.filePath == filePath
+            );
+            
+            if (songIndex != -1) {
+              currentPlaylist.songs![songIndex] = realSong;
+            }
+            
+            _processedFiles++;
+            
+            // 添加处理间隔，减少CPU占用
+            await Future.delayed(Duration(milliseconds: 50));
+            
+            // 每处理20个文件或处理完成时更新UI（减少UI更新频率）
+            if (_processedFiles % 20 == 0 || _processedFiles == _totalFilesToProcess) {
+              await _loadCurrentPlaylistSongs();
+              // 注意：不在处理过程中调用_updateAllSongsList()，避免重复解析所有歌曲
+              _debouncedNotifyListeners(); // 使用防抖机制减少UI更新频率
+            }
+          } catch (e) {
+            // debugPrint('处理元数据失败: $filePath, 错误: $e');
+            _processedFiles++;
+          } finally {
+            semaphore.release();
+          }
+        }));
+      }
+
+      // 等待所有任务完成
+      await Future.wait(futures);
+      
+      // 最终保存
+      await _savePlaylists();
+      await _loadCurrentPlaylistSongs();
+      // 只在处理完成后更新全部歌曲列表，避免处理过程中的重复解析
+      await _updateAllSongsList();
+      
+    } catch (e) {
+      _errorStreamController.add('处理元数据时出错: $e');
+    } finally {
+      _isProcessingMetadata = false;
+      _totalFilesToProcess = 0;
+      _processedFiles = 0;
+      _immediateNotifyListeners(); // 处理完成后立即更新UI
+    }
+  }
+}
+
+/// 简单的信号量实现，用于限制并发数量
+class Semaphore {
+  final int maxCount;
+  int _currentCount;
+  final Queue<Completer<void>> _waitQueue = Queue<Completer<void>>();
+
+  Semaphore(this.maxCount) : _currentCount = maxCount;
+
+  Future<void> acquire() async {
+    if (_currentCount > 0) {
+      _currentCount--;
+      return;
+    }
+
+    final completer = Completer<void>();
+    _waitQueue.add(completer);
+    return completer.future;
+  }
+
+  void release() {
+    if (_waitQueue.isNotEmpty) {
+      final completer = _waitQueue.removeFirst();
+      completer.complete();
+    } else {
+      _currentCount++;
+    }
   }
 }

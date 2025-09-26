@@ -18,6 +18,11 @@ class SettingsProvider with ChangeNotifier {
   static const _secondaryLyricSourceKey =
       'secondaryLyricSource'; // 备用歌词源设置的 key
   static const _addLyricPaddingKey = 'addLyricPadding'; // 歌词上下补位设置的 key
+  static const _enableStatusBarLyricsKey = 'enableStatusBarLyrics'; // 状态栏歌词设置的 key
+  static const _enableDesktopLyricsKey = 'enableDesktopLyrics'; // 桌面悬浮歌词设置的 key
+  static const _desktopLyricsTextColorKey = 'desktopLyricsTextColor'; // 桌面悬浮歌词文字颜色
+  static const _desktopLyricsBackgroundColorKey = 'desktopLyricsBackgroundColor'; // 桌面悬浮歌词背景颜色
+  static const _desktopLyricsFontSizeKey = 'desktopLyricsFontSize'; // 桌面悬浮歌词字体大小
 
   int _maxLinesPerLyric = 2;
   double _fontSize = 20.0; // 默认字体大小
@@ -28,6 +33,11 @@ class SettingsProvider with ChangeNotifier {
   bool _forceSingleLineLyric = false; // 默认不强制单行显示歌词
   double _lyricVerticalSpacing = 6.0; // 默认歌词垂直间距为6.0
   bool _addLyricPadding = false; // 默认不启用歌词上下补位
+  bool _enableStatusBarLyrics = true; // 默认启用状态栏歌词
+  bool _enableDesktopLyrics = false; // 默认不启用桌面悬浮歌词
+  Color _desktopLyricsTextColor = Colors.white; // 默认白色文字
+  Color _desktopLyricsBackgroundColor = Colors.black54; // 默认半透明黑色背景
+  double _desktopLyricsFontSize = 18.0; // 默认字体大小
 
   bool _enableOnlineLyrics = false; // 默认不启用从网络获取歌词
   String _primaryLyricSource = 'primary'; // 默认主要歌词源为某易云音乐
@@ -42,6 +52,11 @@ class SettingsProvider with ChangeNotifier {
   bool get forceSingleLineLyric => _forceSingleLineLyric; // 获取强制单行歌词设置
   double get lyricVerticalSpacing => _lyricVerticalSpacing; // 获取歌词垂直间距
   bool get addLyricPadding => _addLyricPadding; // 获取歌词上下补位设置
+  bool get enableStatusBarLyrics => _enableStatusBarLyrics; // 获取状态栏歌词设置
+  bool get enableDesktopLyrics => _enableDesktopLyrics; // 获取桌面悬浮歌词设置
+  Color get desktopLyricsTextColor => _desktopLyricsTextColor; // 获取桌面悬浮歌词文字颜色
+  Color get desktopLyricsBackgroundColor => _desktopLyricsBackgroundColor; // 获取桌面悬浮歌词背景颜色
+  double get desktopLyricsFontSize => _desktopLyricsFontSize; // 获取桌面悬浮歌词字体大小
 
   bool get enableOnlineLyrics => _enableOnlineLyrics;
   String get primaryLyricSource => _primaryLyricSource; // 获取主要歌词源
@@ -65,6 +80,18 @@ class SettingsProvider with ChangeNotifier {
         prefs.getDouble(_lyricVerticalSpacingKey) ?? 6.0; // 加载歌词垂直间距设置
     _addLyricPadding =
         prefs.getBool(_addLyricPaddingKey) ?? false; // 加载歌词上下补位设置
+    _enableStatusBarLyrics =
+        prefs.getBool(_enableStatusBarLyricsKey) ?? false; // 加载状态栏歌词设置
+    _enableDesktopLyrics =
+        prefs.getBool(_enableDesktopLyricsKey) ?? false; // 加载桌面悬浮歌词设置
+    
+    // 加载桌面悬浮歌词颜色配置
+    final textColorValue = prefs.getInt(_desktopLyricsTextColorKey);
+    _desktopLyricsTextColor = textColorValue != null ? Color(textColorValue) : Colors.white;
+    final backgroundColorValue = prefs.getInt(_desktopLyricsBackgroundColorKey);
+    _desktopLyricsBackgroundColor = backgroundColorValue != null ? Color(backgroundColorValue) : Colors.black54;
+    _desktopLyricsFontSize = prefs.getDouble(_desktopLyricsFontSizeKey) ?? 18.0;
+    
     _primaryLyricSource =
         prefs.getString(_primaryLyricSourceKey) ?? 'primary'; // 加载主要歌词源设置
     _secondaryLyricSource =
@@ -163,5 +190,40 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_addLyricPaddingKey, value);
+  }
+
+  void setEnableStatusBarLyrics(bool value) async {
+    _enableStatusBarLyrics = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_enableStatusBarLyricsKey, value);
+  }
+
+  void setEnableDesktopLyrics(bool value) async {
+    _enableDesktopLyrics = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_enableDesktopLyricsKey, value);
+  }
+
+  void setDesktopLyricsTextColor(Color color) async {
+    _desktopLyricsTextColor = color;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_desktopLyricsTextColorKey, color.value);
+  }
+
+  void setDesktopLyricsBackgroundColor(Color color) async {
+    _desktopLyricsBackgroundColor = color;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_desktopLyricsBackgroundColorKey, color.value);
+  }
+
+  void setDesktopLyricsFontSize(double size) async {
+    _desktopLyricsFontSize = size.clamp(12.0, 32.0);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_desktopLyricsFontSizeKey, _desktopLyricsFontSize);
   }
 }
