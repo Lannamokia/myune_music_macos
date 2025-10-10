@@ -40,6 +40,19 @@
 ***
 
 以上两种方式都可以根据 **歌手** 和 **专辑** 进行自动分类
+
+## 🎶 关于桌面歌词
+由于我使用的框架 [Flutetr](https://flutter.dev/) 暂时不支持多窗口，所以软件内没有提供桌面歌词功能
+
+可以使用其他软件进行替代
+例如：
+- [Lyricify Lite](https://apps.microsoft.com/detail/9nltpsv395k2)
+- [BetterLyrics](https://apps.microsoft.com/detail/9p1wcd1p597r)
+
+只需在播放器内播放音乐，软件即可自动显示歌词
+
+> 上述软件非本人开发，请支持原作者！
+
 ## 📦 内嵌元数据支持
 
 | 音频格式     | 元数据格式               | 支持 |
@@ -111,7 +124,7 @@ sudo apt install libmpv-dev mpv
 ### 环境要求
 
 * 安装 **Rust** 环境
-* 安装 **Flutter SDK**，版本需 ≥ 3.8.0
+* 安装 **Flutter SDK**，**Dart** 版本需 ≥ 3.9.0，**Flutter** 版本需 ≥ 3.35.0
 
 ### 安装依赖
 
@@ -130,7 +143,7 @@ flutter run
 * [**audio\_metadata\_reader**](https://pub.dev/packages/audio_metadata_reader)：读取音频元信息
 * [**media_kit**](https://pub.dev/packages/media_kit)：音频播放支持（太好用了）
 * [**anni\_mpris\_service**](https://pub.dev/packages/anni_mpris_service): D-Bus MPRIS 控件
-* 更多依赖请查看 [pubspec.yaml](pubspec.yaml)
+* 更多依赖请查看 **[pubspec.yaml](pubspec.yaml)**
 
 感谢以下项目和开发者的无私分享：
 

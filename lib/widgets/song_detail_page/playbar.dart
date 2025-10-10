@@ -128,7 +128,7 @@ class _PlaybarState extends State<Playbar> {
                 activeTrackColor: accentColor,
                 inactiveTrackColor: onBarColor.withValues(alpha: 0.7),
                 thumbColor: accentColor,
-                showValueIndicator: ShowValueIndicator.always,
+                showValueIndicator: ShowValueIndicator.onDrag,
               ),
               child: Slider(
                 value: _currentSliderValue,
@@ -379,7 +379,7 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
                   activeTrackColor: accentColor,
                   inactiveTrackColor: onBarColor.withValues(alpha: 0.7),
                   thumbColor: accentColor,
-                  showValueIndicator: ShowValueIndicator.always,
+                  showValueIndicator: ShowValueIndicator.onDrag,
                 ),
                 child: Slider(
                   value: _currentSliderValue,
@@ -436,9 +436,7 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
                       color: onBarColor,
                       size: 28,
                     ),
-                    onPressed: playlistNotifier.playingPlaylist != null
-                        ? () => playlistNotifier.playPrevious()
-                        : null,
+                    onPressed: () => playlistNotifier.playPrevious(),
                   ),
                   const SizedBox(width: 16),
                   // 播放/暂停
@@ -460,11 +458,7 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
                   // 下一首
                   IconButton(
                     icon: Icon(Icons.skip_next, color: onBarColor, size: 28),
-                    onPressed:
-                        playlistNotifier.currentPlaylistSongs.isNotEmpty &&
-                            !playlistNotifier.isLoadingSongs
-                        ? () => playlistNotifier.playNext()
-                        : null,
+                    onPressed: () => playlistNotifier.playNext(),
                   ),
                 ],
               ),
