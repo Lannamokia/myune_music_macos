@@ -6,6 +6,7 @@ import 'playlist_content_notifier.dart';
 import 'playlist_models.dart';
 import '../../widgets/sort_dialog.dart';
 import 'sort_options.dart';
+import '../../utils/permission_dialog.dart';
 
 enum ManagementMode { manual, folder }
 
@@ -14,6 +15,9 @@ class PlaylistContentWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 设置权限对话框回调
+    PlaylistContentNotifier.setPermissionDialogCallback(showLyricsDirectoryPermissionDialog);
+    
     final colorScheme = Theme.of(context).colorScheme;
     // 获取窗口宽高比
     final aspectRatio = MediaQuery.of(context).size.aspectRatio;
@@ -638,7 +642,7 @@ class HeadSongListWidget extends StatelessWidget {
                                   if (value == 'files') {
                                     await notifierContext.pickAndAddSongs();
                                   } else if (value == 'folders') {
-                                    await notifierContext.pickAndAddFolders();
+                                    await notifierContext.pickAndAddFolders(context);
                                   }
                                 },
                                 itemBuilder: (context) => [

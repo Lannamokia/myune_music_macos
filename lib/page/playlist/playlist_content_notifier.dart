@@ -22,12 +22,21 @@ import '../setting/settings_provider.dart';
 import '../../theme/theme_provider.dart';
 import '../../services/status_bar_lyrics_manager.dart';
 import '../../services/desktop_lyrics_manager.dart';
+import '../../utils/permission_dialog.dart';
 
 enum PlayMode { sequence, shuffle, repeatOne }
 
 enum DetailViewContext { playlist, allSongs, artist, album }
 
 class PlaylistContentNotifier extends ChangeNotifier {
+  // --- 权限对话框回调 ---
+  static Future<bool> Function(BuildContext, String)? _permissionDialogCallback;
+  
+  /// 设置权限对话框回调函数
+  static void setPermissionDialogCallback(Future<bool> Function(BuildContext, String) callback) {
+    _permissionDialogCallback = callback;
+  }
+  
   // --- 播放列表相关 ---
   final PlaylistManager _playlistManager = PlaylistManager();
   final SettingsProvider _settingsProvider;
@@ -629,7 +638,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
   }
 
   /// 选择并添加文件夹中的音频文件
-  Future<bool> pickAndAddFolders() async {
+  Future<bool> pickAndAddFolders([BuildContext? context]) async {
     if (_selectedIndex == -1) {
       _infoStreamController.add('请先在左侧选择一个要添加歌曲的歌单');
       return false;
@@ -644,10 +653,15 @@ class PlaylistContentNotifier extends ChangeNotifier {
       return false; // 用户取消
     }
 
+    // 用户通过FilePicker选择了文件夹，说明已经获得了访问权限
+    // 将该目录添加到已授权目录列表中，避免后续重复请求权限
+    _authorizedDirectories.add(selectedDirectory);
+    _directoryAccessCache[selectedDirectory] = DateTime.now();
+
     final currentPlaylist = _playlists[_selectedIndex];
     
     // 扫描文件夹中的音频文件
-    final audioFiles = await _scanDirectoryForAudioFiles(selectedDirectory);
+    final audioFiles = await _scanDirectoryForAudioFiles(selectedDirectory, context);
     
     if (audioFiles.isEmpty) {
       _infoStreamController.add('所选文件夹中没有找到支持的音频文件');
@@ -676,7 +690,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
   }
 
   /// 扫描目录中的音频文件
-  Future<List<String>> _scanDirectoryForAudioFiles(String directoryPath) async {
+  Future<List<String>> _scanDirectoryForAudioFiles(String directoryPath, [BuildContext? context]) async {
     final List<String> audioFiles = [];
     
     try {
@@ -685,7 +699,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
       // 检查目录访问权限
       if (!_hasDirectoryAccess(directoryPath)) {
-        final hasAccess = await _requestDirectoryAccess(directoryPath);
+        final hasAccess = await _requestDirectoryAccess(directoryPath, context);
         if (!hasAccess) {
           return audioFiles;
         }
@@ -2837,8 +2851,8 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
       // 检查目录访问权限
       if (!_hasDirectoryAccess(directory)) {
-        // 请求目录访问权限
-        final hasAccess = await _requestDirectoryAccess(directory);
+        // 请求目录访问权限（歌词查找时不显示对话框）
+        final hasAccess = await _requestDirectoryAccess(directory, null);
         if (!hasAccess) {
           // debugPrint('无法获取目录访问权限：$directory');
           return null;
@@ -2889,7 +2903,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   /// 请求目录访问权限
   /// 在macOS沙盒环境中，需要用户明确授权才能访问目录
-  Future<bool> _requestDirectoryAccess(String directoryPath) async {
+  Future<bool> _requestDirectoryAccess(String directoryPath, [BuildContext? context]) async {
     try {
       // 检查是否已经有权限
       if (_authorizedDirectories.contains(directoryPath)) {
@@ -2901,6 +2915,17 @@ class PlaylistContentNotifier extends ChangeNotifier {
       if (cacheTime != null && 
           DateTime.now().difference(cacheTime).inMinutes < 30) {
         return _authorizedDirectories.contains(directoryPath);
+      }
+
+      // 如果有context，先显示权限提醒对话框
+      if (context != null && _permissionDialogCallback != null) {
+        final shouldProceed = await _permissionDialogCallback!(
+          context, 
+          '由于歌词所在目录的访问权限未被取得，接下来将打开文件夹选择器，请选定相关目录'
+        );
+        if (!shouldProceed) {
+          return false;
+        }
       }
 
       // 使用FilePicker请求目录访问权限

@@ -449,7 +449,7 @@ public class MacOSMediaServicePlugin: NSObject, FlutterPlugin {
         )
         
         // 设置窗口属性
-        window.level = .floating
+        window.level = .screenSaver  // 使用最高层级确保始终顶置
         window.isOpaque = false
         window.backgroundColor = NSColor.clear
         window.hasShadow = false
